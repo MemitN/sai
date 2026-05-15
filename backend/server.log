@@ -1,0 +1,17 @@
+C:\Users\Administrator\Desktop\2\sai-lounge-pos\backend\services\emailService.js:103
+  if (!transporter){                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ter || !fromEmail) {
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+
+SyntaxError: Unexpected token ')'
+    at wrapSafe (node:internal/modules/cjs/loader:1743:18)
+    at Module._compile (node:internal/modules/cjs/loader:1786:20)
+    at Object..js (node:internal/modules/cjs/loader:1943:10)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1556:12)
+    at require (node:internal/modules/helpers:152:16)
+    at Object.<anonymous> (C:\Users\Administrator\Desktop\2\sai-lounge-pos\backend\controllers\passwordController.js:7:24)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+
+Node.js v24.14.1
