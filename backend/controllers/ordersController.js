@@ -10,13 +10,35 @@ const getOrders = async (req, res) => {
 const getOrderByTable = async (req, res) => {
   try {
     const { tableId } = req.params;
-    const orders = await query(`SELECT o.*, rt.number as table_number FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.table_id=? AND o.status IN ('active','sent') ORDER BY o.created_at DESC LIMIT 1`, [tableId]);
-    if (!orders.length) return res.status(404).json(null);
-    const items = await query(`SELECT oi.*, mi.name as item_name, mi.image_emoji FROM order_items oi JOIN menu_items mi ON mi.id=oi.menu_item_id WHERE oi.order_id=?`, [orders[0].id]);
+    console.log('🔍 Looking for order at table:', tableId);
+    
+    const orders = await query(`
+      SELECT o.*, rt.number as table_number 
+      FROM orders o 
+      LEFT JOIN restaurant_tables rt ON rt.id = o.table_id 
+      WHERE o.table_id = ? AND o.status IN ('active', 'sent') 
+      ORDER BY o.created_at DESC 
+      LIMIT 1
+    `, [tableId]);
+    
+    if (!orders.length) {
+      // Return 200 with null instead of 404 to avoid console errors
+      return res.status(200).json(null);
+    }
+    
+    const items = await query(`
+      SELECT oi.*, mi.name as item_name, mi.image_emoji 
+      FROM order_items oi 
+      JOIN menu_items mi ON mi.id = oi.menu_item_id 
+      WHERE oi.order_id = ?
+    `, [orders[0].id]);
+    
     res.json({ ...orders[0], items });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { 
+    console.error('getOrderByTable error:', err);
+    res.status(500).json({ error: err.message }); 
+  }
 };
-
 const createOrder = async (req, res) => {
   try {
     const { table_id, waiter_id, items, notes, order_type='dine_in' } = req.body;
@@ -92,4 +114,124 @@ const getKitchenOrders = async (req, res) => {
   } catch(err) { res.status(500).json({ error: err.message }); }
 };
 
-module.exports = { getOrders, getOrderByTable, createOrder, updateOrder, sendToKitchen, updateKitchenStatus, getKitchenOrders };
+// ORDER HISTORY FUNCTIONS
+const getMyOrderHistory = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    const { from, to, page = 1, limit = 50 } = req.query;
+    
+    const today = new Date().toISOString().split('T')[0];
+    const fromDate = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const toDate = to || today;
+
+    let whereClause = `date(o.updated_at) BETWEEN ? AND ? AND o.status = 'paid'`;
+    const params = [fromDate, toDate];
+
+    // Waiters and bar attendants only see their own orders
+    if (role === 'waiter' || role === 'bar_attendant') {
+      whereClause += ` AND o.waiter_id = ?`;
+      params.push(userId);
+    }
+
+    const offset = (Number(page) - 1) * Number(limit);
+    
+    const orders = await query(`
+      SELECT o.id, o.table_id, o.waiter_id, o.status, o.order_type, o.notes, 
+             o.created_at, o.updated_at,
+             rt.number as table_number,
+             u.name as waiter_name,
+             b.total as bill_total,
+             b.payment_method,
+             b.paid_at,
+             COALESCE(SUM(oi.quantity * oi.unit_price), 0) as total_amount,
+             COUNT(DISTINCT oi.id) as item_count
+        FROM orders o
+        LEFT JOIN restaurant_tables rt ON rt.id = o.table_id
+        LEFT JOIN users u ON u.id = o.waiter_id
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        LEFT JOIN bills b ON b.order_id = o.id AND b.status = 'paid'
+       WHERE ${whereClause}
+       GROUP BY o.id
+       ORDER BY o.updated_at DESC
+       LIMIT ? OFFSET ?
+    `, [...params, Number(limit), offset]);
+
+    // Get items for each order
+    for (const order of orders) {
+      order.items = await query(`
+        SELECT oi.*, mi.name as item_name, mi.image_emoji
+        FROM order_items oi
+        JOIN menu_items mi ON mi.id = oi.menu_item_id
+        WHERE oi.order_id = ?
+      `, [order.id]);
+    }
+
+    const totalResult = await query(`
+      SELECT COUNT(DISTINCT o.id) as cnt 
+      FROM orders o 
+      WHERE ${whereClause}
+    `, params);
+
+    res.json({ 
+      orders, 
+      total: totalResult[0]?.cnt || 0, 
+      page: Number(page), 
+      limit: Number(limit), 
+      from: fromDate, 
+      to: toDate 
+    });
+  } catch(err) { 
+    console.error('Order history error:', err);
+    res.status(500).json({ error: err.message }); 
+  }
+};
+
+const getOrderDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const role = req.user?.role;
+
+    const orders = await query(`
+      SELECT o.*, rt.number as table_number, u.name as waiter_name,
+             b.total as bill_total, b.payment_method, b.paid_at, b.discount
+        FROM orders o
+        LEFT JOIN restaurant_tables rt ON rt.id = o.table_id
+        LEFT JOIN users u ON u.id = o.waiter_id
+        LEFT JOIN bills b ON b.order_id = o.id
+       WHERE o.id = ?
+    `, [id]);
+
+    if (!orders.length) return res.status(404).json({ error: 'Order not found' });
+
+    // Check permission: waiters can only see their own orders
+    if ((role === 'waiter' || role === 'bar_attendant') && orders[0].waiter_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const items = await query(`
+      SELECT oi.*, mi.name as item_name, mi.image_emoji
+      FROM order_items oi
+      JOIN menu_items mi ON mi.id = oi.menu_item_id
+      WHERE oi.order_id = ?
+    `, [id]);
+
+    res.json({ ...orders[0], items });
+  } catch(err) { 
+    res.status(500).json({ error: err.message }); 
+  }
+};
+
+// EXPORT ALL FUNCTIONS
+module.exports = { 
+  getOrders, 
+  getMyOrderHistory,
+  getOrderDetails,
+  getOrderByTable, 
+  createOrder, 
+  updateOrder, 
+  sendToKitchen, 
+  updateKitchenStatus, 
+  getKitchenOrders 
+};

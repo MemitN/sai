@@ -19,6 +19,7 @@ import WaiterShiftsPage from './pages/WaiterShiftsPage';
 import CustomersPage from './pages/CustomersPage';
 import InsightsPage from './pages/InsightsPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import OrderHistoryPage from './pages/OrderHistoryPage';
 import api, { getBaseUrl, getNetworkInfo, testNetworkConnection, setApiUrl } from './hooks/useApi';
 
 // Helper function to get image URL dynamically (works from any device on the network)
@@ -48,15 +49,17 @@ const logoSrc = getImageUrl('/logo.jpeg');
 // Role-based navigation config
 const NAV = {
   waiter: [
-    { page: 'tables',        label: 'Tables',       icon: 'fa-table' },
-    { page: 'orders',        label: 'Orders',       icon: 'fa-utensils' },
-    { page: 'rooms',         label: 'Rooms',        icon: 'fa-bed' },
-    { page: 'reservations',  label: 'Reservations', icon: 'fa-calendar-check' },
-    { page: 'waiter_shifts', label: 'My Hours',     icon: 'fa-clock' },
+    { page: 'tables',         label: 'Tables',        icon: 'fa-table' },
+    { page: 'orders',         label: 'Orders',        icon: 'fa-utensils' },
+    { page: 'order_history',  label: 'Order History', icon: 'fa-history' },
+    { page: 'rooms',          label: 'Rooms',         icon: 'fa-bed' },
+    { page: 'reservations',   label: 'Reservations',  icon: 'fa-calendar-check' },
+    { page: 'waiter_shifts',  label: 'My Hours',      icon: 'fa-clock' },
   ],
   bar_attendant: [
     { page: 'tables',        label: 'Tables',       icon: 'fa-table' },
     { page: 'orders',        label: 'Orders',       icon: 'fa-utensils' },
+    { page: 'order_history', label: 'Order History', icon: 'fa-history' },
     { page: 'kitchen',       label: 'Kitchen / Bar',icon: 'fa-fire-burner' },
     { page: 'inventory',     label: 'Bar Inventory',icon: 'fa-boxes-stacked' },
     { page: 'cashier',       label: 'Cashier',      icon: 'fa-cash-register' },
@@ -70,6 +73,7 @@ const NAV = {
     { page: 'reports',       label: 'Reports',      icon: 'fa-chart-line' },
     { page: 'room_bills',    label: 'Room Bills',   icon: 'fa-receipt' },
     { page: 'shifts',        label: 'Shifts',       icon: 'fa-clock' },
+    { page: 'waiter_shifts', label: 'My Hours',     icon: 'fa-clock' }, 
   ],
   kitchen: [
     { page: 'kitchen',       label: 'Kitchen Display', icon: 'fa-fire-burner' },
@@ -79,6 +83,7 @@ const NAV = {
     { page: 'dashboard',     label: 'Dashboard',    icon: 'fa-chart-pie' },
     { page: 'tables',        label: 'Tables',       icon: 'fa-table' },
     { page: 'orders',        label: 'Orders',       icon: 'fa-utensils' },
+    { page: 'order_history', label: 'Order History', icon: 'fa-history' },
     { page: 'kitchen',       label: 'Kitchen / Bar',icon: 'fa-fire-burner' },
     { page: 'cashier',       label: 'Cashier',      icon: 'fa-cash-register' },
     { page: 'customers',     label: 'Customers',    icon: 'fa-users' },
@@ -100,6 +105,7 @@ const NAV = {
     { page: 'dashboard',     label: 'Dashboard',    icon: 'fa-chart-pie' },
     { page: 'tables',        label: 'Tables',       icon: 'fa-table' },
     { page: 'orders',        label: 'Orders',       icon: 'fa-utensils' },
+    { page: 'order_history', label: 'Order History', icon: 'fa-history' },
     { page: 'kitchen',       label: 'Kitchen / Bar',icon: 'fa-fire-burner' },
     { page: 'cashier',       label: 'Cashier',      icon: 'fa-cash-register' },
     { page: 'customers',     label: 'Customers',    icon: 'fa-users' },
@@ -138,6 +144,7 @@ const PAGE_TITLES = {
   requisitions: 'Stock Requisitions',
   reservations: 'Room Reservations',
   waiter_shifts:'Staff Hours & Commissions',
+  order_history:'Order History',
   customers:    'Customers & Loyalty',
   insights:     'Business Insights',
 };
@@ -298,6 +305,7 @@ function AppShell() {
   const handleBack = () => { setSelectedTable(null); setPage('tables'); };
 
   const renderPage = () => {
+    if (page === 'order_history') return <OrderHistoryPage />;
     if (page === 'promotions')    return <SettingsPage initialTab="promotions" />;
     if (page === 'shifts')        return <CashierPage />;
     if (page === 'room_bills')    return <RoomBillsPage />;
@@ -451,18 +459,27 @@ function AppShell() {
                         const isUnread = !n.read_by?.includes(String(user?.id));
                         return (
                           <div key={n.id} className="notif-item"
-                            style={{ background: isUnread ? '#FFFBEB' : 'white', cursor:'pointer' }}
+                            style={{ background: isUnread ? '#FFFBEB' : 'white', cursor:'pointer', display:'flex', alignItems:'flex-start', gap:8 }}
                             onClick={async () => {
                               try { await api.put(`/notifications/${n.id}/read`); loadNotifs(); } catch {}
                             }}>
                             <div className={`notif-icon ${n.type === 'low_stock' ? 'badge-amber' : n.type === 'out_of_stock' ? 'badge-red' : 'badge-blue'}`}
-                              style={{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                              style={{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                               <i className={`fa-solid ${n.type === 'low_stock' || n.type === 'out_of_stock' ? 'fa-triangle-exclamation' : 'fa-info'}`} style={{ fontSize:13 }} />
                             </div>
                             <div style={{ flex:1 }}>
                               <div className="notif-text" style={{ fontWeight: isUnread ? 700 : 400 }}>{n.message}</div>
                               <div className="notif-time">{new Date(n.created_at).toLocaleString()}</div>
                             </div>
+                            <button
+                              style={{ background:'none', border:'none', cursor:'pointer', color:'#9CA3AF', padding:'2px 4px', flexShrink:0 }}
+                              title="Delete notification"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try { await api.delete(`/notifications/${n.id}`); loadNotifs(); } catch {}
+                              }}>
+                              <i className="fa-solid fa-xmark" style={{ fontSize:12 }} />
+                            </button>
                           </div>
                         );
                       })}

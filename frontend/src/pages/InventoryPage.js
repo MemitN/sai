@@ -14,7 +14,9 @@ export default function InventoryPage() {
   const [form, setForm] = useState({});
   const [newForm, setNewForm] = useState({ name:'', category:'', department:'kitchen', quantity:0, unit:'pcs', reorder_level:5, cost_price:0 });
   const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const canEdit = ['admin','management','bar_attendant'].includes(user?.role);
+  const canDelete = ['admin','management'].includes(user?.role);
 
   const load = useCallback(async () => {
     try {
@@ -51,6 +53,22 @@ export default function InventoryPage() {
       load();
     } catch(e) { alert('Error: ' + e.response?.data?.error); }
     finally { setSaving(false); }
+  };
+
+  const deleteInventoryItem = async (item) => {
+    if (!window.confirm(`⚠️ PERMANENT DELETION\n\nAre you sure you want to delete "${item.name}" from inventory?\n\nThis action CANNOT be undone.\n\nNote: Items that have been used in orders cannot be deleted.`)) return;
+    
+    setSaving(true);
+    try {
+      await api.delete(`/inventory/${item.id}`);
+      alert(`✅ "${item.name}" has been deleted from inventory.`);
+      setDeleteConfirm(null);
+      load();
+    } catch(e) { 
+      const errorMsg = e.response?.data?.error || e.message;
+      alert('Error: ' + errorMsg);
+    }
+    setSaving(false);
   };
 
   const filtered = items.filter(i =>
@@ -114,7 +132,7 @@ export default function InventoryPage() {
                 <th>Unit Cost</th>
                 <th>Value</th>
                 <th>Status</th>
-                {canEdit && <th>Action</th>}
+                {(canEdit || canDelete) && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -138,13 +156,24 @@ export default function InventoryPage() {
                     <td>KES {Number(item.cost_price||0).toLocaleString()}</td>
                     <td style={{fontWeight:600}}>KES {Number((item.quantity*item.cost_price)||0).toLocaleString()}</td>
                     <td><span className={`badge ${statusLabel[sc].cls}`}>{statusLabel[sc].label}</span></td>
-                    {canEdit && (
-                      <td>
-                        <button className="btn btn-sm btn-outline" onClick={()=>openEdit(item)}>
-                          <i className="fa-solid fa-pen" />
-                        </button>
-                      </td>
-                    )}
+                    <td>
+                      <div style={{display:'flex', gap:4}}>
+                        {canEdit && (
+                          <button className="btn btn-sm btn-outline" onClick={()=>openEdit(item)} title="Edit">
+                            <i className="fa-solid fa-pen" />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button 
+                            className="btn btn-sm btn-danger" 
+                            onClick={() => setDeleteConfirm(item)} 
+                            title="Delete Item"
+                          >
+                            <i className="fa-solid fa-trash" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -184,7 +213,7 @@ export default function InventoryPage() {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setEditItem(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={saveEdit} disabled={saving}>
-                {saving?<span className="spinner" style={{width:14,height:14,borderWidth:2}}/>:<><i className="fa-solid fa-floppy-disk" /> Save</>}
+                {saving ? <span className="spinner" style={{width:14,height:14,borderWidth:2}}/> : <><i className="fa-solid fa-floppy-disk" /> Save</>}
               </button>
             </div>
           </div>
@@ -241,7 +270,41 @@ export default function InventoryPage() {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={()=>setAddModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={addItem} disabled={saving||!newForm.name}>
-                {saving?<span className="spinner" style={{width:14,height:14,borderWidth:2}}/>:<><i className="fa-solid fa-plus" /> Add Item</>}
+                {saving ? <span className="spinner" style={{width:14,height:14,borderWidth:2}}/> : <><i className="fa-solid fa-plus" /> Add Item</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setDeleteConfirm(null)}>
+          <div className="modal" style={{maxWidth:450}}>
+            <div className="modal-header" style={{background:'#FEE2E2', borderBottomColor:'#FCA5A5'}}>
+              <span className="modal-title" style={{color:'#991B1B'}}>
+                <i className="fa-solid fa-triangle-exclamation" style={{marginRight:8,color:'#EF4444'}} />
+                Delete Inventory Item
+              </span>
+              <button className="modal-close" onClick={()=>setDeleteConfirm(null)}><i className="fa-solid fa-xmark" /></button>
+            </div>
+            <div className="modal-body">
+              <p style={{fontSize:14, marginBottom:12}}>
+                Are you sure you want to permanently delete:
+              </p>
+              <div style={{background:'#FEF2F2', padding:12, borderRadius:8, marginBottom:16}}>
+                <div style={{fontWeight:700, fontSize:15}}>{deleteConfirm.name}</div>
+                <div style={{fontSize:12, color:'#78716C'}}>Category: {deleteConfirm.category} · Dept: {deleteConfirm.department}</div>
+                <div style={{fontSize:12, color:'#78716C'}}>Current stock: {deleteConfirm.quantity} {deleteConfirm.unit}</div>
+              </div>
+              <p style={{fontSize:13, color:'#78716C'}}>
+                ⚠️ <strong>Warning:</strong> This action cannot be undone. Items that have been used in orders or purchase orders cannot be deleted.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={()=>setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={()=>deleteInventoryItem(deleteConfirm)} disabled={saving}>
+                {saving ? <span className="spinner" style={{width:14,height:14,borderWidth:2}}/> : <><i className="fa-solid fa-trash" /> Permanently Delete</>}
               </button>
             </div>
           </div>

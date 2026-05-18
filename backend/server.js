@@ -1,3 +1,8 @@
+// ==================== TIMEZONE FIX ====================
+// Force Kenya/East Africa timezone - MUST be first line
+process.env.TZ = 'Africa/Nairobi';
+// For Windows: process.env.TZ = 'E. Africa Standard Time';
+
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -312,6 +317,10 @@ const PORT = process.env.PORT || 3001;
 
 async function start() {
   try {
+    // Verify timezone is set correctly
+    console.log(`🕐 Server Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+    console.log(`🕐 Current Server Time: ${new Date().toLocaleString('en-KE')}`);
+    
     await initializeDatabase();
     
     // Fix missing columns after initialization
@@ -327,7 +336,7 @@ async function start() {
     
     const localIP = getLocalIP();
     
-    server.listen(PORT, '0.0.0.0', () => {  // ← CRITICAL: Listen on all network interfaces
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`🚀 Sai Lounge POS v2 is RUNNING!`);
       console.log(`${'='.repeat(50)}`);
@@ -335,6 +344,8 @@ async function start() {
       console.log(`   http://${localIP}:${PORT}`);
       console.log(`\n💻 ACCESS FROM THIS COMPUTER:`);
       console.log(`   http://localhost:${PORT}`);
+      console.log(`\n🕐 TIMEZONE: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+      console.log(`🕐 Current Time: ${new Date().toLocaleString('en-KE')}`);
       console.log(`\n${'='.repeat(50)}`);
       console.log(`\n👥 Default Access Codes:`);
       console.log(`   Admin:         4000`);

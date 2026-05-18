@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../hooks/useApi';
+import { useAuth } from '../context/AuthContext';
 
 const ROLES = ['admin','management','cashier','bar_attendant','waiter','kitchen'];
 const ROLE_LABELS = { admin:'Admin', management:'Management', cashier:'Cashier', bar_attendant:'Bar Attendant', waiter:'Waiter', kitchen:'Kitchen' };
 const ROLE_BADGE = { admin:'badge-red', management:'badge-purple', cashier:'badge-green', bar_attendant:'badge-orange', waiter:'badge-blue', kitchen:'badge-amber' };
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth();
+  const isAdmin = ['admin','management'].includes(currentUser?.role);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
@@ -76,11 +79,11 @@ export default function UsersPage() {
   };
 
   const deleteUser = async (u) => {
-    if (!window.confirm(`Deactivate ${u.name}?`)) return;
+    if (!window.confirm(`Permanently delete ${u.name}? This action cannot be undone.`)) return;
     try {
       await api.delete(`/users/${u.id}`);
       load();
-    } catch(e) { alert('Error: ' + e.message); }
+    } catch(e) { alert('Error: ' + (e.response?.data?.error || e.message)); }
   };
 
   const filtered = users.filter(u =>
@@ -173,8 +176,8 @@ export default function UsersPage() {
                       >
                         <i className={`fa-solid ${u.active?'fa-pause':'fa-play'}`} />
                       </button>
-                      <button className="btn btn-sm btn-danger" onClick={()=>deleteUser(u)} title="Deactivate">
-                        <i className="fa-solid fa-trash" />
+                      <button className="btn btn-sm btn-danger" onClick={()=>deleteUser(u)} title="Permanently Delete User">
+                        <i className="fa-solid fa-user-xmark" />
                       </button>
                       <button
                         className="btn btn-sm"

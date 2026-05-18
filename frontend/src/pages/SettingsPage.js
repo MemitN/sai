@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../hooks/useApi';
 
-export default function SettingsPage() {
-  const [tab, setTab] = useState('business');
+export default function SettingsPage({ initialTab } = {}) {
+  const [tab, setTab] = useState(initialTab || 'business');
   const [email, setEmail] = useState({ smtp_host:'', smtp_port:587, smtp_user:'', smtp_pass:'', from_email:'', from_name:'Sai Lounge POS', report_emails:'', send_eod_report:1 });
   const [mpesa, setMpesa] = useState({ shortcode:'', passkey:'', consumer_key:'', consumer_secret:'', callback_url:'', environment:'sandbox' });
   const [promotions, setPromotions] = useState([]);
@@ -90,7 +90,7 @@ export default function SettingsPage() {
     setBacking(false);
   };
 
-  const TABS = [
+  const ALL_TABS = [
     { id: 'business',   label: 'Business',   icon: 'fa-building' },
     { id: 'loyalty',    label: 'Loyalty',     icon: 'fa-star' },
     { id: 'email',      label: 'Email',       icon: 'fa-envelope' },
@@ -99,13 +99,17 @@ export default function SettingsPage() {
     { id: 'happy_hour', label: 'Happy Hour',  icon: 'fa-moon' },
     { id: 'backups',    label: 'Backups',     icon: 'fa-database' },
   ];
+  // When opened as Promotions page, hide unrelated tabs
+  const TABS = initialTab === 'promotions'
+    ? ALL_TABS.filter(t => ['promotions','happy_hour'].includes(t.id))
+    : ALL_TABS;
 
   if (loading) return <div className="loading"><div className="spinner"/></div>;
 
   return (
     <div>
       <div className="page-header">
-        <h2><i className="fa-solid fa-gear" style={{marginRight:8,color:'#F59E0B'}} />Settings</h2>
+        <h2><i className={`fa-solid ${initialTab === 'promotions' ? 'fa-tags' : 'fa-gear'}`} style={{marginRight:8,color:'#F59E0B'}} />{initialTab === 'promotions' ? 'Promotions' : 'Settings'}</h2>
       </div>
 
       <div className="settings-tabs">

@@ -24,7 +24,6 @@ function saveDB() {
 // Helper function to safely add columns
 async function addColumnIfNotExists(table, column, type) {
   try {
-    // Check if column exists
     const result = db.exec(`PRAGMA table_info(${table})`);
     const columns = result[0]?.values.map(col => col[1]) || [];
     
@@ -34,10 +33,125 @@ async function addColumnIfNotExists(table, column, type) {
       return true;
     }
   } catch(e) {
-    // Column might already exist or other error - ignore
     console.log(`⚠️ Could not add column ${column} to ${table}: ${e.message}`);
   }
   return false;
+}
+
+// ==================== TIMEZONE FIX FUNCTIONS ====================
+
+// Get current Kenya time as SQLite compatible string (YYYY-MM-DD HH:MM:SS)
+function getKenyaTime() {
+  const now = new Date();
+  // Kenya is UTC+3 year-round
+  const kenyaTime = new Date(now.getTime() + (3 * 60 * 60 * 1000));
+  return kenyaTime.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+// Convert UTC stored time to Kenya time for display
+function toKenyaTime(utcDateString) {
+  if (!utcDateString) return null;
+  const date = new Date(utcDateString);
+  date.setHours(date.getHours() + 3);
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+// Fix existing timezone data (convert UTC to Kenya time)
+async function fixExistingTimezones(db) {
+  console.log('🕐 Fixing existing timezone data (UTC → Kenya Time)...');
+  
+  try {
+    // Fix waiter_shifts times
+    db.run(`UPDATE waiter_shifts SET clock_in = datetime(clock_in, '+3 hours') WHERE clock_in IS NOT NULL`);
+    db.run(`UPDATE waiter_shifts SET clock_out = datetime(clock_out, '+3 hours') WHERE clock_out IS NOT NULL`);
+    db.run(`UPDATE waiter_shifts SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    
+    // Fix orders times
+    db.run(`UPDATE orders SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE orders SET updated_at = datetime(updated_at, '+3 hours') WHERE updated_at IS NOT NULL`);
+    
+    // Fix bills times
+    db.run(`UPDATE bills SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE bills SET paid_at = datetime(paid_at, '+3 hours') WHERE paid_at IS NOT NULL`);
+    db.run(`UPDATE bills SET updated_at = datetime(updated_at, '+3 hours') WHERE updated_at IS NOT NULL`);
+    
+    // Fix shifts times
+    db.run(`UPDATE shifts SET opened_at = datetime(opened_at, '+3 hours') WHERE opened_at IS NOT NULL`);
+    db.run(`UPDATE shifts SET closed_at = datetime(closed_at, '+3 hours') WHERE closed_at IS NOT NULL`);
+    
+    // Fix room_bills times
+    db.run(`UPDATE room_bills SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE room_bills SET paid_at = datetime(paid_at, '+3 hours') WHERE paid_at IS NOT NULL`);
+    
+    // Fix rooms (check-in/out times)
+    db.run(`UPDATE rooms SET check_in = datetime(check_in, '+3 hours') WHERE check_in IS NOT NULL`);
+    db.run(`UPDATE rooms SET check_out = datetime(check_out, '+3 hours') WHERE check_out IS NOT NULL`);
+    
+    // Fix room_reservations
+    db.run(`UPDATE room_reservations SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE room_reservations SET updated_at = datetime(updated_at, '+3 hours') WHERE updated_at IS NOT NULL`);
+    
+    // Fix commission_log
+    db.run(`UPDATE commission_log SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE commission_log SET paid_at = datetime(paid_at, '+3 hours') WHERE paid_at IS NOT NULL`);
+    
+    // Fix customers
+    db.run(`UPDATE customers SET created_at = datetime(created_at, '+3 hours') WHERE created_at IS NOT NULL`);
+    db.run(`UPDATE customers SET updated_at = datetime(updated_at, '+3 hours') WHERE updated_at IS NOT NULL`);
+    
+    console.log('✅ Timezone fix applied - converted UTC to Kenya time (UTC+3)');
+  } catch(e) {
+    console.log('⚠️ Timezone fix error:', e.message);
+  }
+}
+
+// Create triggers to automatically use Kenya time for new inserts
+function createTimezoneTriggers(db) {
+  console.log('🔧 Creating timezone triggers...');
+  
+  // Trigger for waiter_shifts
+  try {
+    db.run(`DROP TRIGGER IF EXISTS set_kenya_time_waiter_shifts`);
+    db.run(`
+      CREATE TRIGGER set_kenya_time_waiter_shifts
+      AFTER INSERT ON waiter_shifts
+      BEGIN
+        UPDATE waiter_shifts 
+        SET clock_in = datetime(NEW.clock_in, '+3 hours')
+        WHERE id = NEW.id AND clock_in IS NOT NULL;
+      END
+    `);
+  } catch(e) { console.log('Trigger waiter_shifts:', e.message); }
+  
+  // Trigger for orders
+  try {
+    db.run(`DROP TRIGGER IF EXISTS set_kenya_time_orders`);
+    db.run(`
+      CREATE TRIGGER set_kenya_time_orders
+      AFTER INSERT ON orders
+      BEGIN
+        UPDATE orders 
+        SET created_at = datetime(NEW.created_at, '+3 hours')
+        WHERE id = NEW.id;
+      END
+    `);
+  } catch(e) { console.log('Trigger orders:', e.message); }
+  
+  // Trigger for bills
+  try {
+    db.run(`DROP TRIGGER IF EXISTS set_kenya_time_bills`);
+    db.run(`
+      CREATE TRIGGER set_kenya_time_bills
+      AFTER INSERT ON bills
+      BEGIN
+        UPDATE bills 
+        SET created_at = datetime(NEW.created_at, '+3 hours')
+        WHERE id = NEW.id;
+      END
+    `);
+  } catch(e) { console.log('Trigger bills:', e.message); }
+  
+  console.log('✅ Timezone triggers created');
 }
 
 async function initializeDatabase() {
@@ -55,7 +169,7 @@ async function initializeDatabase() {
     email TEXT,
     phone TEXT,
     can_manage_rooms INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS restaurant_tables (
@@ -103,8 +217,8 @@ async function initializeDatabase() {
     order_type TEXT DEFAULT 'dine_in' CHECK(order_type IN ('dine_in','room','takeaway')),
     status TEXT DEFAULT 'active' CHECK(status IN ('active','sent','held','paid','cancelled')),
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS order_items (
@@ -115,13 +229,14 @@ async function initializeDatabase() {
     unit_price REAL NOT NULL,
     notes TEXT,
     kitchen_status TEXT DEFAULT 'pending' CHECK(kitchen_status IN ('pending','preparing','done')),
-    sent_at TEXT
+    sent_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS bills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER REFERENCES orders(id),
     table_id INTEGER REFERENCES restaurant_tables(id),
+    customer_id INTEGER,
     subtotal REAL NOT NULL DEFAULT 0,
     discount REAL DEFAULT 0,
     tax REAL DEFAULT 0,
@@ -134,8 +249,11 @@ async function initializeDatabase() {
     card_amount REAL DEFAULT 0,
     cashier_id INTEGER REFERENCES users(id),
     paid_at TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    loyalty_points_earned INTEGER DEFAULT 0,
+    loyalty_points_redeemed INTEGER DEFAULT 0,
+    loyalty_discount REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS inventory (
@@ -148,7 +266,7 @@ async function initializeDatabase() {
     reorder_level REAL DEFAULT 5,
     cost_price REAL DEFAULT 0,
     supplier_id INTEGER,
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS inventory_movements (
@@ -159,7 +277,7 @@ async function initializeDatabase() {
     reference TEXT,
     user_id INTEGER REFERENCES users(id),
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS suppliers (
@@ -171,7 +289,7 @@ async function initializeDatabase() {
     address TEXT,
     payment_terms TEXT,
     active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -186,7 +304,7 @@ async function initializeDatabase() {
     delivery_comments TEXT,
     expected_date TEXT,
     received_at TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS purchase_order_items (
@@ -205,7 +323,7 @@ async function initializeDatabase() {
   db.run(`CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id),
-    opened_at TEXT DEFAULT (datetime('now')),
+    opened_at TEXT DEFAULT (datetime('now', '+3 hours')),
     closed_at TEXT,
     opening_float REAL DEFAULT 0,
     closing_cash REAL DEFAULT 0,
@@ -226,7 +344,7 @@ async function initializeDatabase() {
     start_time TEXT,
     end_time TEXT,
     applicable_days TEXT DEFAULT '1,2,3,4,5,6,7',
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS rooms (
@@ -244,7 +362,7 @@ async function initializeDatabase() {
     check_out TEXT,
     deposit_paid REAL DEFAULT 0,
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS room_bills (
@@ -266,7 +384,7 @@ async function initializeDatabase() {
     payment_method TEXT,
     cashier_id INTEGER REFERENCES users(id),
     paid_at TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS room_extra_charges (
@@ -274,7 +392,7 @@ async function initializeDatabase() {
     room_bill_id INTEGER REFERENCES room_bills(id),
     description TEXT NOT NULL,
     amount REAL NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS room_orders (
@@ -284,7 +402,7 @@ async function initializeDatabase() {
     bill_id INTEGER REFERENCES bills(id),
     amount REAL NOT NULL,
     status TEXT DEFAULT 'pending' CHECK(status IN ('pending','billed')),
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS buffet_bookings (
@@ -298,7 +416,7 @@ async function initializeDatabase() {
     total_amount REAL DEFAULT 0,
     status TEXT DEFAULT 'booked' CHECK(status IN ('booked','confirmed','completed','cancelled')),
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS notifications (
@@ -307,7 +425,7 @@ async function initializeDatabase() {
     message TEXT NOT NULL,
     for_roles TEXT DEFAULT 'admin,management',
     read_by TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS happy_hour_schedules (
@@ -327,7 +445,7 @@ async function initializeDatabase() {
     tots_opened REAL DEFAULT 0,
     tots_sold REAL DEFAULT 0,
     tots_remaining REAL DEFAULT 0,
-    date TEXT DEFAULT (date('now')),
+    date TEXT DEFAULT (date('now', '+3 hours')),
     notes TEXT
   )`);
 
@@ -345,7 +463,7 @@ async function initializeDatabase() {
     send_daily_report INTEGER DEFAULT 0,
     send_weekly_report INTEGER DEFAULT 0,
     send_monthly_report INTEGER DEFAULT 0,
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS mpesa_settings (
@@ -356,10 +474,9 @@ async function initializeDatabase() {
     consumer_secret TEXT,
     callback_url TEXT,
     environment TEXT DEFAULT 'sandbox' CHECK(environment IN ('sandbox','production')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== M-PESA PENDING TRANSACTIONS TABLE ====================
   db.run(`CREATE TABLE IF NOT EXISTS mpesa_pending_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checkout_request_id TEXT UNIQUE NOT NULL,
@@ -369,7 +486,7 @@ async function initializeDatabase() {
     status TEXT DEFAULT 'pending' CHECK(status IN ('pending','completed','failed')),
     mpesa_receipt TEXT,
     error_message TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
     completed_at TEXT
   )`);
 
@@ -381,8 +498,8 @@ async function initializeDatabase() {
     status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','issued','rejected')),
     approved_by INTEGER REFERENCES users(id),
     issued_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS requisition_items (
@@ -398,10 +515,9 @@ async function initializeDatabase() {
     token TEXT UNIQUE NOT NULL,
     expires_at TEXT NOT NULL,
     used INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== ROOM RESERVATIONS ====================
   db.run(`CREATE TABLE IF NOT EXISTS room_reservations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     room_id INTEGER REFERENCES rooms(id),
@@ -424,15 +540,14 @@ async function initializeDatabase() {
     cancellation_reason TEXT,
     notes TEXT,
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== WAITER SHIFT HOURS ====================
   db.run(`CREATE TABLE IF NOT EXISTS waiter_shifts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id),
-    clock_in TEXT NOT NULL DEFAULT (datetime('now')),
+    clock_in TEXT NOT NULL DEFAULT (datetime('now', '+3 hours')),
     clock_out TEXT,
     scheduled_hours REAL DEFAULT 8,
     actual_hours REAL,
@@ -441,13 +556,12 @@ async function initializeDatabase() {
     overtime_approved_by INTEGER REFERENCES users(id),
     overtime_notes TEXT,
     break_minutes INTEGER DEFAULT 0,
-    date TEXT DEFAULT (date('now')),
+    date TEXT DEFAULT (date('now', '+3 hours')),
     status TEXT DEFAULT 'active' CHECK(status IN ('active','completed')),
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== COMMISSION LOG ====================
   db.run(`CREATE TABLE IF NOT EXISTS commission_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     waiter_id INTEGER REFERENCES users(id),
@@ -464,10 +578,9 @@ async function initializeDatabase() {
     paid INTEGER DEFAULT 0,
     paid_at TEXT,
     paid_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== CUSTOMERS & LOYALTY ====================
   db.run(`CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -480,8 +593,8 @@ async function initializeDatabase() {
     tier TEXT DEFAULT 'bronze' CHECK(tier IN ('bronze','silver','gold','platinum')),
     notes TEXT,
     active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours')),
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS loyalty_transactions (
@@ -493,12 +606,11 @@ async function initializeDatabase() {
     spend_amount REAL DEFAULT 0,
     description TEXT,
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== BUSINESS SETTINGS ====================
   db.run(`CREATE TABLE IF NOT EXISTS business_settings (
-    id INTEGER PRIMARY KEY DEFAULT 1,
+    id INTEGER DEFAULT 1 PRIMARY KEY,
     business_name TEXT DEFAULT 'Sai Lounge',
     tagline TEXT DEFAULT 'Premium Dining Experience',
     phone TEXT,
@@ -518,23 +630,18 @@ async function initializeDatabase() {
     loyalty_gold_threshold INTEGER DEFAULT 20000,
     loyalty_platinum_threshold INTEGER DEFAULT 50000,
     receipt_footer TEXT DEFAULT 'Thank you for dining with us!',
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // Insert default row if not exists
-  db.run(`INSERT OR IGNORE INTO business_settings (id) VALUES (1)`);
-
-  // ==================== BACKUPS LOG ====================
   db.run(`CREATE TABLE IF NOT EXISTS backups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT,
     size_bytes INTEGER DEFAULT 0,
     type TEXT DEFAULT 'auto' CHECK(type IN ('auto','manual')),
     status TEXT DEFAULT 'success',
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
 
-  // ==================== GOODS RECEIVE LOG ====================
   db.run(`CREATE TABLE IF NOT EXISTS goods_receive_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     purchase_order_id INTEGER REFERENCES purchase_orders(id),
@@ -548,124 +655,131 @@ async function initializeDatabase() {
     shortage_reason TEXT,
     condition_notes TEXT,
     received_by INTEGER REFERENCES users(id),
-    received_at TEXT DEFAULT (datetime('now'))
+    received_at TEXT DEFAULT (datetime('now', '+3 hours'))
   )`);
+
+  // Insert default business settings if not exists
+  db.run(`INSERT OR IGNORE INTO business_settings (id) VALUES (1)`);
+
+  // ==================== RUN MIGRATIONS ====================
+  console.log('Running migrations for existing database...');
+  
+  const migrations = [
+    { table: 'users', columns: [
+      { name: 'commission_rate', type: 'REAL DEFAULT 3.0' },
+      { name: 'email', type: 'TEXT' },
+      { name: 'phone', type: 'TEXT' },
+      { name: 'can_manage_rooms', type: 'INTEGER DEFAULT 0' }
+    ]},
+    { table: 'menu_categories', columns: [
+      { name: 'department', type: "TEXT DEFAULT 'kitchen'" }
+    ]},
+    { table: 'menu_items', columns: [
+      { name: 'active', type: 'INTEGER DEFAULT 1' },
+      { name: 'image_url', type: 'TEXT' },
+      { name: 'happy_hour_price', type: 'REAL' },
+      { name: 'unit', type: "TEXT DEFAULT 'serving'" },
+      { name: 'commission_eligible', type: 'INTEGER DEFAULT 0' },
+      { name: 'commission_rate', type: 'REAL DEFAULT 0' },
+      { name: 'commission_threshold', type: 'REAL DEFAULT 0' }
+    ]},
+    { table: 'inventory', columns: [
+      { name: 'department', type: "TEXT DEFAULT 'kitchen'" },
+      { name: 'supplier_id', type: 'INTEGER' },
+      { name: 'updated_at', type: "TEXT DEFAULT (datetime('now', '+3 hours'))" }
+    ]},
+    { table: 'orders', columns: [
+      { name: 'room_id', type: 'INTEGER' },
+      { name: 'order_type', type: "TEXT DEFAULT 'dine_in'" },
+      { name: 'updated_at', type: "TEXT DEFAULT (datetime('now', '+3 hours'))" }
+    ]},
+    { table: 'restaurant_tables', columns: [
+      { name: 'type', type: "TEXT DEFAULT 'table'" },
+      { name: 'name', type: 'TEXT' }
+    ]},
+    { table: 'bills', columns: [
+      { name: 'mpesa_ref', type: 'TEXT' },
+      { name: 'tax', type: 'REAL DEFAULT 0' },
+      { name: 'updated_at', type: "TEXT DEFAULT (datetime('now', '+3 hours'))" },
+      { name: 'cash_amount', type: 'REAL DEFAULT 0' },
+      { name: 'mpesa_amount', type: 'REAL DEFAULT 0' },
+      { name: 'card_amount', type: 'REAL DEFAULT 0' },
+      { name: 'cashier_id', type: 'INTEGER' },
+      { name: 'paid_at', type: 'TEXT' },
+      { name: 'discount', type: 'REAL DEFAULT 0' },
+      { name: 'payment_method', type: 'TEXT' },
+      { name: 'subtotal', type: 'REAL DEFAULT 0' },
+      { name: 'customer_id', type: 'INTEGER' },
+      { name: 'loyalty_points_earned', type: 'INTEGER DEFAULT 0' },
+      { name: 'loyalty_points_redeemed', type: 'INTEGER DEFAULT 0' },
+      { name: 'loyalty_discount', type: 'REAL DEFAULT 0' }
+    ]},
+    { table: 'shifts', columns: [
+      { name: 'user_id', type: 'INTEGER' },
+      { name: 'notes', type: 'TEXT' },
+      { name: 'opening_float', type: 'REAL DEFAULT 0' },
+      { name: 'closing_cash', type: 'REAL DEFAULT 0' },
+      { name: 'closing_mpesa', type: 'REAL DEFAULT 0' },
+      { name: 'closing_card', type: 'REAL DEFAULT 0' }
+    ]},
+    { table: 'purchase_orders', columns: [
+      { name: 'receive_status', type: "TEXT DEFAULT 'pending'" },
+      { name: 'received_amount', type: 'REAL DEFAULT 0' },
+      { name: 'delivery_comments', type: 'TEXT' }
+    ]},
+    { table: 'purchase_order_items', columns: [
+      { name: 'shortage_qty', type: 'REAL DEFAULT 0' },
+      { name: 'shortage_reason', type: 'TEXT' },
+      { name: 'item_notes', type: 'TEXT' },
+      { name: 'receive_status', type: "TEXT DEFAULT 'pending'" }
+    ]},
+    { table: 'rooms', columns: [
+      { name: 'guest_email', type: 'TEXT' },
+      { name: 'guest_id_number', type: 'TEXT' },
+      { name: 'name', type: 'TEXT' },
+      { name: 'type', type: "TEXT DEFAULT 'standard'" },
+      { name: 'rate_per_night', type: 'REAL DEFAULT 0' },
+      { name: 'deposit_paid', type: 'REAL DEFAULT 0' },
+      { name: 'notes', type: 'TEXT' },
+      { name: 'created_at', type: "TEXT DEFAULT (datetime('now', '+3 hours'))" }
+    ]},
+    { table: 'requisitions', columns: [
+      { name: 'approved_by', type: 'INTEGER REFERENCES users(id)' },
+      { name: 'issued_by', type: 'INTEGER REFERENCES users(id)' }
+    ]},
+    { table: 'email_settings', columns: [
+      { name: 'daily_report_time', type: "TEXT DEFAULT '20:00'" },
+      { name: 'send_daily_report', type: 'INTEGER DEFAULT 0' },
+      { name: 'send_weekly_report', type: 'INTEGER DEFAULT 0' },
+      { name: 'send_monthly_report', type: 'INTEGER DEFAULT 0' }
+    ]},
+    { table: 'goods_receive_log', columns: [
+      { name: 'shortage_reason', type: 'TEXT' },
+      { name: 'condition_notes', type: 'TEXT' },
+      { name: 'received_by', type: 'INTEGER REFERENCES users(id)' }
+    ]}
+  ];
+
+  for (const { table, columns } of migrations) {
+    for (const { name, type } of columns) {
+      await addColumnIfNotExists(table, name, type);
+    }
+  }
 
   // ==================== SEED DATABASE IF EMPTY ====================
   const userCount = db.exec("SELECT COUNT(*) as c FROM users")[0]?.values[0][0];
   if (!userCount || userCount === 0) {
     await seedDatabase(db);
-  } else {
-    // ==================== MIGRATIONS FOR EXISTING DATABASES ====================
-    console.log('Running migrations for existing database...');
-    
-    // Define all migrations in a clean, organized way
-    const migrations = [
-      { table: 'users', columns: [
-        { name: 'commission_rate', type: 'REAL DEFAULT 3.0' },
-        { name: 'email', type: 'TEXT' },
-        { name: 'phone', type: 'TEXT' },
-        { name: 'can_manage_rooms', type: 'INTEGER DEFAULT 0' }
-      ]},
-      { table: 'menu_categories', columns: [
-        { name: 'department', type: "TEXT DEFAULT 'kitchen'" }
-      ]},
-      { table: 'menu_items', columns: [
-        { name: 'active', type: 'INTEGER DEFAULT 1' },  // Add this line
-        { name: 'image_url', type: 'TEXT' },
-        { name: 'happy_hour_price', type: 'REAL' },
-        { name: 'unit', type: "TEXT DEFAULT 'serving'" },
-        { name: 'commission_eligible', type: 'INTEGER DEFAULT 0' },
-        { name: 'commission_rate', type: 'REAL DEFAULT 0' },
-        { name: 'commission_threshold', type: 'REAL DEFAULT 0' }
-      ]},
-      { table: 'inventory', columns: [
-        { name: 'department', type: "TEXT DEFAULT 'kitchen'" },
-        { name: 'supplier_id', type: 'INTEGER' },
-        { name: 'updated_at', type: "TEXT DEFAULT (datetime('now'))" }
-      ]},
-      { table: 'orders', columns: [
-        { name: 'room_id', type: 'INTEGER' },
-        { name: 'order_type', type: "TEXT DEFAULT 'dine_in'" },
-        { name: 'updated_at', type: "TEXT DEFAULT (datetime('now'))" }
-      ]},
-      { table: 'restaurant_tables', columns: [
-        { name: 'type', type: "TEXT DEFAULT 'table'" },
-        { name: 'name', type: 'TEXT' }
-      ]},
-      { table: 'bills', columns: [
-        { name: 'mpesa_ref', type: 'TEXT' },
-        { name: 'tax', type: 'REAL DEFAULT 0' },
-        { name: 'updated_at', type: "TEXT DEFAULT (datetime('now'))" },
-        { name: 'cash_amount', type: 'REAL DEFAULT 0' },
-        { name: 'mpesa_amount', type: 'REAL DEFAULT 0' },
-        { name: 'card_amount', type: 'REAL DEFAULT 0' },
-        { name: 'cashier_id', type: 'INTEGER' },
-        { name: 'paid_at', type: 'TEXT' },
-        { name: 'discount', type: 'REAL DEFAULT 0' },
-        { name: 'payment_method', type: 'TEXT' },
-        { name: 'subtotal', type: 'REAL DEFAULT 0' },
-        { name: 'customer_id', type: 'INTEGER' },
-        { name: 'loyalty_points_earned', type: 'INTEGER DEFAULT 0' },
-        { name: 'loyalty_points_redeemed', type: 'INTEGER DEFAULT 0' },
-        { name: 'loyalty_discount', type: 'REAL DEFAULT 0' }
-      ]},
-      { table: 'shifts', columns: [
-        { name: 'user_id', type: 'INTEGER' },
-        { name: 'notes', type: 'TEXT' },
-        { name: 'opening_float', type: 'REAL DEFAULT 0' },
-        { name: 'closing_cash', type: 'REAL DEFAULT 0' },
-        { name: 'closing_mpesa', type: 'REAL DEFAULT 0' },
-        { name: 'closing_card', type: 'REAL DEFAULT 0' }
-      ]},
-      { table: 'purchase_orders', columns: [
-        { name: 'receive_status', type: "TEXT DEFAULT 'pending'" },
-        { name: 'received_amount', type: 'REAL DEFAULT 0' },
-        { name: 'delivery_comments', type: 'TEXT' }
-      ]},
-      { table: 'purchase_order_items', columns: [
-        { name: 'shortage_qty', type: 'REAL DEFAULT 0' },
-        { name: 'shortage_reason', type: 'TEXT' },
-        { name: 'item_notes', type: 'TEXT' },
-        { name: 'receive_status', type: "TEXT DEFAULT 'pending'" }
-      ]},
-      { table: 'rooms', columns: [
-        { name: 'guest_email', type: 'TEXT' },
-        { name: 'guest_id_number', type: 'TEXT' },
-        { name: 'name', type: 'TEXT' },
-        { name: 'type', type: "TEXT DEFAULT 'standard'" },
-        { name: 'rate_per_night', type: 'REAL DEFAULT 0' },
-        { name: 'deposit_paid', type: 'REAL DEFAULT 0' },
-        { name: 'notes', type: 'TEXT' },
-        { name: 'created_at', type: "TEXT DEFAULT (datetime('now'))" }
-      ]},
-      { table: 'requisitions', columns: [
-        { name: 'approved_by', type: 'INTEGER REFERENCES users(id)' },
-        { name: 'issued_by', type: 'INTEGER REFERENCES users(id)' }
-      ]},
-      { table: 'email_settings', columns: [
-        { name: 'daily_report_time', type: "TEXT DEFAULT '20:00'" },
-        { name: 'send_daily_report', type: 'INTEGER DEFAULT 0' },
-        { name: 'send_weekly_report', type: 'INTEGER DEFAULT 0' },
-        { name: 'send_monthly_report', type: 'INTEGER DEFAULT 0' }
-      ]},
-      { table: 'goods_receive_log', columns: [
-        { name: 'shortage_reason', type: 'TEXT' },
-        { name: 'condition_notes', type: 'TEXT' },
-        { name: 'received_by', type: 'INTEGER REFERENCES users(id)' }
-      ]}
-    ];
-
-    // Apply migrations
-    for (const { table, columns } of migrations) {
-      for (const { name, type } of columns) {
-        await addColumnIfNotExists(table, name, type);
-      }
-    }
   }
 
+  // ==================== FIX EXISTING TIMEZONES ====================
+  await fixExistingTimezones(db);
+  
+  // ==================== CREATE TIMEZONE TRIGGERS ====================
+  createTimezoneTriggers(db);
+
   saveDB();
-  console.log('✅ Database initialized');
+  console.log('✅ Database initialized with Kenya timezone (UTC+3)');
   return db;
 }
 
@@ -799,131 +913,6 @@ async function seedDatabase(db) {
       [name, cat, dept, qty, unit, reorder, cost]);
   }
 
-  // Add Recipe Ingredients
-  console.log('🍳 Adding recipe ingredients for menu items...');
-
-  const menuItemsMap = {};
-  const menuItemRows = db.exec("SELECT id, name FROM menu_items")[0]?.values || [];
-  for (const [id, name] of menuItemRows) {
-    menuItemsMap[name] = id;
-  }
-
-  const inventoryMap = {};
-  const inventoryRows = db.exec("SELECT id, name FROM inventory")[0]?.values || [];
-  for (const [id, name] of inventoryRows) {
-    inventoryMap[name] = id;
-  }
-
-  // Eggs Any Style
-  if (menuItemsMap['Eggs Any Style'] && inventoryMap['Eggs']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Eggs Any Style'], inventoryMap['Eggs'], 2]);
-  }
-  if (menuItemsMap['Eggs Any Style'] && inventoryMap['Cooking Oil']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Eggs Any Style'], inventoryMap['Cooking Oil'], 0.05]);
-  }
-
-  // English Breakfast
-  if (menuItemsMap['English Breakfast']) {
-    const ingredients = [
-      { name: 'Eggs', qty: 2 },
-      { name: 'Sausages', qty: 2 },
-      { name: 'Bacon', qty: 2 },
-      { name: 'Beans', qty: 0.5 },
-      { name: 'Bread', qty: 2 }
-    ];
-    for (const ing of ingredients) {
-      if (inventoryMap[ing.name]) {
-        db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-          [menuItemsMap['English Breakfast'], inventoryMap[ing.name], ing.qty]);
-      }
-    }
-  }
-
-  // Sai Lounge Big Breakfast
-  if (menuItemsMap['Sai Lounge Big Breakfast']) {
-    const ingredients = [
-      { name: 'Eggs', qty: 3 },
-      { name: 'Sausages', qty: 2 },
-      { name: 'Bacon', qty: 2 },
-      { name: 'Beans', qty: 0.5 },
-      { name: 'Bread', qty: 2 }
-    ];
-    for (const ing of ingredients) {
-      if (inventoryMap[ing.name]) {
-        db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-          [menuItemsMap['Sai Lounge Big Breakfast'], inventoryMap[ing.name], ing.qty]);
-      }
-    }
-  }
-
-  // Pancakes
-  if (menuItemsMap['Pancakes (3pcs)']) {
-    if (inventoryMap['Flour']) {
-      db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-        [menuItemsMap['Pancakes (3pcs)'], inventoryMap['Flour'], 0.2]);
-    }
-    if (inventoryMap['Milk']) {
-      db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-        [menuItemsMap['Pancakes (3pcs)'], inventoryMap['Milk'], 0.2]);
-    }
-    if (inventoryMap['Eggs']) {
-      db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-        [menuItemsMap['Pancakes (3pcs)'], inventoryMap['Eggs'], 1]);
-    }
-  }
-
-  // Nyama Choma
-  if (menuItemsMap['Nyama Choma Beef (500g)'] && inventoryMap['Beef (kg)']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Nyama Choma Beef (500g)'], inventoryMap['Beef (kg)'], 0.5]);
-  }
-  if (menuItemsMap['Nyama Choma Beef (1kg)'] && inventoryMap['Beef (kg)']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Nyama Choma Beef (1kg)'], inventoryMap['Beef (kg)'], 1]);
-  }
-
-  // Burgers
-  if (menuItemsMap['Chicken Burger + Fries'] && inventoryMap['Chicken (kg)']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Chicken Burger + Fries'], inventoryMap['Chicken (kg)'], 0.2]);
-  }
-  if (menuItemsMap['Beef Burger + Fries'] && inventoryMap['Beef (kg)']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Beef Burger + Fries'], inventoryMap['Beef (kg)'], 0.2]);
-  }
-
-  // Beers
-  const beerItems = ['Tusker (500ml)', 'White Cap (500ml)', 'Heineken (330ml)'];
-  for (const beerName of beerItems) {
-    if (menuItemsMap[beerName] && inventoryMap['Tusker Bottles']) {
-      db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-        [menuItemsMap[beerName], inventoryMap['Tusker Bottles'], 1]);
-    }
-  }
-
-  // Spirits
-  const spiritItems = ['Jameson Whisky', 'Jack Daniels', 'Gilbeys Gin', 'Smirnoff Vodka'];
-  for (const spiritName of spiritItems) {
-    if (menuItemsMap[spiritName] && inventoryMap['Jameson 750ml']) {
-      db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-        [menuItemsMap[spiritName], inventoryMap['Jameson 750ml'], 0.067]);
-    }
-  }
-
-  // Sodas
-  if (menuItemsMap['Coke (300ml)'] && inventoryMap['Coke 300ml']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Coke (300ml)'], inventoryMap['Coke 300ml'], 1]);
-  }
-  if (menuItemsMap['Red Bull (330ml)'] && inventoryMap['Red Bull 330ml']) {
-    db.run("INSERT INTO menu_item_ingredients (menu_item_id, inventory_id, quantity_used) VALUES (?, ?, ?)", 
-      [menuItemsMap['Red Bull (330ml)'], inventoryMap['Red Bull 330ml'], 1]);
-  }
-
-  console.log('✅ Recipe ingredients added successfully');
-
   // Seed Promotions
   db.run("INSERT INTO promotions (name, type, value, active, start_time, end_time, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
     ['Happy Hour', 'happy_hour', 15, 1, '17:00', '19:00', '15% off all bar items during happy hour']);
@@ -941,9 +930,7 @@ async function seedDatabase(db) {
   // Seed M-Pesa Settings
   db.run("INSERT INTO mpesa_settings (environment) VALUES (?)", ['sandbox']);
 
-  // Seed Business Settings (already inserted via INSERT OR IGNORE)
-  
-  console.log('✅ Database seeded successfully with all data!');
+  console.log('✅ Database seeded successfully!');
 }
 
 async function query(sql, params = []) {
@@ -974,7 +961,6 @@ async function run(sql, params = []) {
   }
 }
 
-// Run multiple statements atomically — if any fail, whole transaction rolls back
 async function runTransaction(operations) {
   const database = await getDB();
   try {
@@ -994,4 +980,4 @@ async function runTransaction(operations) {
   }
 }
 
-module.exports = { initializeDatabase, query, run, runTransaction, saveDB, getDB };
+module.exports = { initializeDatabase, query, run, runTransaction, saveDB, getDB, getKenyaTime, toKenyaTime };

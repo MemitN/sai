@@ -10,7 +10,6 @@ const menuController = require('../controllers/menuController');
 const tablesController = require('../controllers/tablesController');
 const reportsController = require('../controllers/reportsController');
 const roomController = require('../controllers/roomController');
-
 const reservationController = require('../controllers/reservationController');
 const customerController    = require('../controllers/customerController');
 
@@ -130,31 +129,30 @@ router.put('/menu/items/:id', authenticate, requireRole('admin', 'management'), 
 router.delete('/menu/items/:id', authenticate, requireRole('admin', 'management'), menuController.deleteMenuItem);
 
 // ==================== ORDERS ====================
+router.get('/orders/kitchen', authenticate, ordersController.getKitchenOrders);
+router.get('/orders/my-history', authenticate, ordersController.getMyOrderHistory);
+router.get('/orders/table/:tableId', authenticate, ordersController.getOrderByTable);  // This is the one causing 404
+router.get('/orders/:id/details', authenticate, ordersController.getOrderDetails);
 router.get('/orders', authenticate, ordersController.getOrders);
-router.get('/orders/table/:tableId', authenticate, ordersController.getOrderByTable);
 router.post('/orders', authenticate, ordersController.createOrder);
 router.put('/orders/:id', authenticate, ordersController.updateOrder);
 router.post('/orders/:id/send', authenticate, ordersController.sendToKitchen);
 router.put('/orders/:id/kitchen-status', authenticate, ordersController.updateKitchenStatus);
-router.get('/orders/kitchen', authenticate, ordersController.getKitchenOrders);
 
 // ==================== BILLING ====================
-// ==================== BILLING ====================
-// IMPORTANT: static paths (/bills/refresh, /bills/merge*, /bills/add-items)
-// MUST be declared BEFORE parameterised paths (/bills/:id) — Express matches top-down.
-router.get('/bills',                  authenticate,                                                   billingController.getUnpaidBills);
-router.post('/bills',                 authenticate,                                                   billingController.createBill);
+router.get('/bills',                  authenticate, billingController.getUnpaidBills);
+router.post('/bills',                 authenticate, billingController.createBill);
 
 // Static sub-paths — registered before /bills/:id so Express doesn't treat these as an :id value
-router.post('/bills/refresh',         authenticate,                                                   billingController.refreshBillTotal);
-router.post('/bills/add-items',       authenticate,                                                   billingController.addItemsToBill);
+router.post('/bills/refresh',         authenticate, billingController.refreshBillTotal);
+router.post('/bills/add-items',       authenticate, billingController.addItemsToBill);
 router.post('/bills/merge-preview',   authenticate, requireRole('admin','management','cashier','waiter'), billingController.mergeBillPreview);
 router.post('/bills/merge',           authenticate, requireRole('admin','management','cashier','waiter'), billingController.mergeBills);
 
 // Parameterised paths — after all static paths
-router.get('/bills/:id',              authenticate,                                                   billingController.getBillDetails);
-router.post('/bills/:id/pay',         authenticate, requireRole('admin','management','cashier'),      billingController.processPayment);
-router.put('/bills/:id/refresh',      authenticate,                                                   billingController.refreshBillById);
+router.get('/bills/:id',              authenticate, billingController.getBillDetails);
+router.post('/bills/:id/pay',         authenticate, requireRole('admin','management','cashier'), billingController.processPayment);
+router.put('/bills/:id/refresh',      authenticate, billingController.refreshBillById);
 
 // ==================== REQUISITIONS ====================
 router.get('/reports/requisitions', authenticate, reportsController.getRequisitions);
@@ -173,16 +171,18 @@ router.get('/reports/fast-slow', authenticate, reportsController.getFastSlowItem
 // ==================== INVENTORY ====================
 router.put('/inventory/:id', authenticate, requireRole('admin', 'management', 'bar_attendant'), reportsController.updateInventory);
 router.post('/inventory', authenticate, requireRole('admin', 'management'), reportsController.addInventoryItem);
+router.delete('/inventory/:id', authenticate, requireRole('admin', 'management'), reportsController.deleteInventoryItem);
 
 // ==================== USERS ====================
 router.get('/users', authenticate, requireRole('admin', 'management'), reportsController.getUsers);
 router.post('/users', authenticate, requireRole('admin', 'management'), reportsController.createUser);
 router.put('/users/:id', authenticate, requireRole('admin', 'management'), reportsController.updateUser);
-router.delete('/users/:id', authenticate, requireRole('admin', 'management'), reportsController.deleteUser);
+router.delete('/users/:id', authenticate, requireRole('admin'), reportsController.deleteUser);  // Only admin can delete
 
 // ==================== NOTIFICATIONS ====================
 router.get('/notifications', authenticate, reportsController.getNotifications);
 router.put('/notifications/:id/read', authenticate, reportsController.markNotificationRead);
+router.delete('/notifications/:id', authenticate, reportsController.deleteNotification);
 
 // ==================== SHIFTS ====================
 router.get('/shifts', authenticate, reportsController.getShifts);
@@ -201,6 +201,7 @@ router.put('/settings/mpesa', authenticate, requireRole('admin', 'management'), 
 router.get('/suppliers', authenticate, reportsController.getSuppliers);
 router.post('/suppliers', authenticate, requireRole('admin', 'management'), reportsController.createSupplier);
 router.put('/suppliers/:id', authenticate, requireRole('admin', 'management'), reportsController.updateSupplier);
+router.delete('/suppliers/:id', authenticate, requireRole('admin'), reportsController.deleteSupplier);
 
 // ==================== PURCHASE ORDERS ====================
 router.get('/purchase-orders',                    authenticate, reportsController.getPurchaseOrders);

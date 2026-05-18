@@ -143,8 +143,9 @@ const updateUser = async (req, res) => {
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
-    await run("UPDATE users SET active=0 WHERE id=?", [id]);
-    res.json({success:true});
+    if (String(id) === String(req.user?.id)) return res.status(400).json({ error: 'Cannot delete your own account' });
+    await run("DELETE FROM users WHERE id=?", [id]);
+    res.json({ success: true });
   } catch(err) { res.status(500).json({error:err.message}); }
 };
 
@@ -167,6 +168,32 @@ const markNotificationRead = async (req, res) => {
     await run("UPDATE notifications SET read_by=? WHERE id=?", [readBy.join(','), id]);
     res.json({success:true});
   } catch(err) { res.status(500).json({error:err.message}); }
+};
+
+const deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await run("DELETE FROM notifications WHERE id=?", [id]);
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+};
+
+const deleteSupplier = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const open = await query("SELECT COUNT(*) as cnt FROM purchase_orders WHERE supplier_id=? AND status NOT IN ('received','cancelled')", [id]);
+    if (open[0]?.cnt > 0) return res.status(400).json({ error: 'Cannot delete supplier with open purchase orders. Close or cancel them first.' });
+    await run("DELETE FROM suppliers WHERE id=?", [id]);
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+};
+
+const deleteInventoryItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await run("DELETE FROM inventory WHERE id=?", [id]);
+    res.json({ success: true });
+  } catch(err) { res.status(500).json({ error: err.message }); }
 };
 
 // ==================== REQUISITIONS ====================
@@ -831,6 +858,9 @@ module.exports = {
   deleteUser,
   getNotifications, 
   markNotificationRead,
+  deleteNotification,
+  deleteSupplier,
+  deleteInventoryItem,
   getShifts, 
   openShift, 
   closeShift,

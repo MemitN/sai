@@ -60,6 +60,14 @@ export default function SuppliersPage() {
     setModal('supplier');
   };
 
+  const deleteSupplier = async (s) => {
+    if (!window.confirm(`Permanently delete supplier "${s.name}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/suppliers/${s.id}`);
+      load();
+    } catch(e) { alert('Error: ' + (e.response?.data?.error || e.message)); }
+  };
+
   const addPoItem    = () => setPoForm(f => ({ ...f, items:[...f.items, { inventory_id:'', quantity:1, unit_price:0, notes:'' }] }));
   const removePoItem = (i) => setPoForm(f => ({ ...f, items:f.items.filter((_,idx)=>idx!==i) }));
   const updatePoItem = (i, field, val) => setPoForm(f => ({ ...f, items:f.items.map((item,idx)=>idx===i?{...item,[field]:val}:item) }));
@@ -370,6 +378,23 @@ export default function SuppliersPage() {
                             }}
                           >
                             <i className="fa-solid fa-plus" style={{ fontSize: 10 }} /> PO
+                          </button>
+                          <button 
+                            onClick={() => deleteSupplier(s)}
+                            style={{
+                              background: '#FEF2F2',
+                              border: '1px solid #FECACA',
+                              borderRadius: 8,
+                              padding: '6px 12px',
+                              color: '#991B1B',
+                              cursor: 'pointer',
+                              fontSize: 11,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <i className="fa-solid fa-trash" style={{ fontSize: 10 }} /> Delete
                           </button>
                         </div>
                        </td>
